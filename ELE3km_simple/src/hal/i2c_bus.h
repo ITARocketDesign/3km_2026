@@ -1,4 +1,4 @@
-// hal/i2c_bus.h — recuperação do barramento I²C travado (issue 09).
+// hal/i2c_bus.h — recuperação do barramento I²C travado (issue 07).
 //
 // A defesa contra o modo de falha mais provável da placa (hazard H5): o GND da
 // IMU flutua nesta revisão, e uma peça nesse estado não "deixa de responder"
@@ -6,10 +6,12 @@
 // levando o barômetro junto. Nenhum retry por software resolve enquanto a linha
 // estiver presa: só bordas de clock soltam um escravo preso no meio de um byte.
 //
-// Esta é só o MECANISMO. A política de retentativa periódica (5 s) e a máquina de
-// saúde {OK, DEGRADED, FAILED} são da issue 10 — o mesmo corte que os rádios já
-// fazem (a HAL do rádio tem recover(), a cadência é da 10). Quem chama esta
-// rotina, e no máximo um módulo por ciclo, é a task de voo.
+// Esta é só o MECANISMO. Quem chama esta rotina — numa leitura I²C que falha, e no
+// máximo um módulo por ciclo — é o superloop (issue 07). O fallback NÃO tem a
+// política de diagnóstico do ELE3km: sem retentativa periódica de 5 s, sem máquina
+// de saúde {OK, DEGRADED, FAILED}, sem contador de reinit. Se o begin() pós
+// recuperação falhar, a peça sumiu, a flag do módulo latcheia falsa e ele para de
+// ser lido; o backstop é o watchdog/reboot da issue 02.
 #pragma once
 
 namespace hal {

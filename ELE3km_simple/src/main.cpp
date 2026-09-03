@@ -28,6 +28,7 @@
 #include "hal/bmp280.h"
 #include "hal/boot_counter.h"
 #include "hal/gps_neo6m.h"
+#include "hal/i2c_bus.h"
 #include "hal/mpu6050.h"
 #include "hal/radio_sx1276.h"
 #include "hal/sd_log.h"
@@ -101,7 +102,7 @@ void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.println();
-    Serial.println("ELE3km_simple — issue 06: log microSD pre-alocado, escrita por ciclo em blocos de 512 B");
+    Serial.println("ELE3km_simple — issue 07: recuperacao minima do barramento I2C (clock-out + begin, 1/ciclo)");
 
     // Só agora o barramento SPI pode subir. Um rádio e o cartão dividem esta VSPI.
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_LORA_CS);
@@ -172,16 +173,41 @@ void loop() {
     }
 
     // 3. Lê os sensores para a amostra de diagnóstico. IMU a 50 Hz, baro a 25 Hz num
-    //    subciclo. Uma leitura que falha só marca a amostra como não confiável — a
-    //    recuperação de barramento I²C é da issue 07.
+    //    subciclo. Uma leitura I²C que falha depois do timeout duro do adaptador é um
+    //    barramento travado (H5): um escravo segurando SDA baixa, que nenhum retry por
+    //    software solta. A recuperação da issue 07 responde com clock-out por bit-bang
+    //    (hal::i2c_bus_recover) + begin() do dispositivo, para soltar a linha e
+    //    reaplicar timeout e configuração. No MÁXIMO um módulo é recuperado por ciclo
+    //    — a rotina custa ~10–50 ms e não pode comer o ciclo de forma sustentada; o
+    //    orçamento vai para o primeiro que falha (IMU antes do baro). Se o begin()
+    //    falhar, a peça sumiu: a flag latcheia falsa e o módulo para de ser lido, e o
+    //    watchdog/reboot é o backstop. Sem contador de reinit, sem retentativa de 5 s.
     core::SensorSample sample;  // defaults declaram "sem leitura fresca"
+    bool i2c_recovered = false;  // orçamento de uma recuperação por ciclo
+
     if (g_imu_ok) {
         sample.imu_valid =
             g_imu.read(sample.accel_mg, sample.gyro_ddps, sample.accel_saturated);
+        if (!sample.imu_valid && !i2c_recovered) {
+            i2c_recovered = true;
+            hal::i2c_bus_recover();
+            g_imu_ok = g_imu.begin();
+            Serial.printf("i2c: recover MPU6050 @ %lu ms -> %s\n",
+                          static_cast<unsigned long>(cycle_start_ms),
+                          g_imu_ok ? "ok" : "AUSENTE");
+        }
     }
     if (g_baro_ok && static_cast<int32_t>(cycle_start_ms - next_baro_ms) >= 0) {
         next_baro_ms      = cycle_start_ms + kBaroPeriodMs;
         sample.baro_valid = g_baro.read(sample.pressure_pa, sample.temperature_c);
+        if (!sample.baro_valid && !i2c_recovered) {
+            i2c_recovered = true;
+            hal::i2c_bus_recover();
+            g_baro_ok = g_baro.begin();
+            Serial.printf("i2c: recover BMP280 @ %lu ms -> %s\n",
+                          static_cast<unsigned long>(cycle_start_ms),
+                          g_baro_ok ? "ok" : "AUSENTE");
+        }
     }
     if (g_gps_ok) {
         sample.gps                = g_gps.fix(cycle_start_ms);

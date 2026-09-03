@@ -113,6 +113,13 @@ constexpr uint8_t kSx1276 = 1 << 5;
 // quando a referência reusada foi julgada absurda e a altitude caiu para o GPS —
 // é o sinal que diz ao solo que a altitude mudou de fonte (H4.4).
 constexpr uint8_t kAltRef = 1 << 6;
+// Bit 7 (issue 04): ao menos um eixo do acelerômetro bateu no fundo de escala
+// nesta amostra. Ao contrário dos demais bits, 1 = evento RUIM (dado de boost
+// clipado), não subsistema OK — o ELE3km original deixava esta informação morrer
+// na conversão para mg (lacuna documentada no replay). Aqui ela é gravada, mas SÓ
+// no byte de saúde do REGISTRO: o pacote de rádio não a carrega, para não dar
+// significado novo ao byte de saúde congelado que a estação de solo decodifica.
+constexpr uint8_t kAccelSat = 1 << 7;
 }  // namespace health_bit
 
 // Saúde dos subsistemas que a task de I/O possui (barramento SPI) e que o núcleo

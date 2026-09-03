@@ -47,3 +47,57 @@ ou de dois rádios); **não** reescrever driver.
 ## Blocked by
 
 - 01 (esqueleto, HAL a copiar, pins/DISCIPLINE)
+
+## Estado da implementação (2026-09-02)
+
+Feito. O esqueleto de voo sobe e o superloop roda; falta só a verificação de
+bancada (placa física), que espera o hardware.
+
+- **HAL copiada verbatim** para `src/hal/`: `board.*`, `i2c_bus.*`, `bmp280.*`,
+  `mpu6050.*`, `gps_neo6m.*`, `radio_sx1276.*`, `sd_log.*`, `boot_counter.*`.
+  Nenhum ajuste foi preciso — os arquivos do ELE3km já são de rádio único
+  (SX1276) e não têm resquício de `may_start_write` nem de dois rádios. `board.cpp`
+  já prende o E22 abandonado em reset (NSS alto, NRST baixo). Nenhum `#include`
+  aponta para fora de `ELE3km_simple/`.
+- **`platformio.ini`**: `RadioLib@^7.7.1` e `SdFat@^2.3.0` adicionados ao env
+  `heltec` (a HAL entra com elas, como previsto no comentário do arquivo).
+- **`src/main.cpp`** reescrito como superloop:
+  - `hal::board_early_init()` é a primeira chamada: GPIO18/23/32 HIGH e WiFi/BT
+    off, tudo **antes** de `SPI.begin()`.
+  - Bring-up: baro, IMU, GPS, SX1276 (`begin()` só configura, não transmite) e
+    microSD. Cada `begin()`/`mount()` que falha marca a flag do módulo como falsa e
+    o boot segue — nenhum módulo ausente trava o `setup()`.
+  - Superloop no `loop()` do Arduino (a loopTask), temporizado a **50 Hz** com
+    `vTaskDelayUntil` (Δt = 20 ms). Corpo: alimenta o watchdog, drena a UART do
+    GPS, lê os sensores e imprime o diagnóstico a ~4 Hz com a folga do ciclo
+    medida no Serial. **Sem lógica de voo** (altitude, pacote, gravação por ciclo
+    são das issues 03/06).
+  - **TWDT**: a loopTask se inscreve (`esp_task_wdt_add`) no fim do `setup()` e
+    alimenta (`esp_task_wdt_reset`) a cada volta — uma subscrição só (superloop),
+    contra as duas do ELE3km.
+
+### Decisão de escopo (grill deste ciclo)
+
+- **microSD: só montagem.** `SdLog` ganhou um método `mount()` mínimo (montagem do
+  cartão para detectar presença, sem criar arquivo, pré-alocar nem gravar
+  cabeçalho). O arquivo pré-alocado, o cabeçalho com o datum (101325 Pa) e a
+  escrita por ciclo continuam **inteiramente na issue 06**, que é dona do log
+  durável, e o datum na issue 03. Foi a única adição à HAL copiada — não uma
+  reescrita de driver.
+- **`BootCounter::next()` não é chamado ainda.** O contador é copiado, mas quem o
+  usa é a issue 06 (arquivo nomeado pelo contador de boot). Chamá-lo agora só
+  incrementaria a NVS a cada boot de bancada sem uso.
+
+### Definition of Done
+
+1. ✅ `pio test -e native` — 5/5 (regressão; a issue não acrescenta núcleo).
+2. ✅ `pio run -e heltec_wifi_lora_32_V2` compila (RAM 15,3 %, Flash 27,7 %).
+3. ✅ As cinco greps de `DISCIPLINE.md` saem vazias.
+4. ✅ Esta seção.
+5. ✅ `NEXT.md` atualizado (02 → ✅, ▶ move para a 03).
+
+### Aberto para a bancada (precisa da placa)
+
+- A placa sobe, imprime o diagnóstico de sensores no Serial e não reseta sozinha.
+- Folga do ciclo de 50 Hz confirmada no Serial em hardware real.
+- Um módulo fisicamente ausente (baro/IMU/GPS/SD/rádio) não trava o boot.

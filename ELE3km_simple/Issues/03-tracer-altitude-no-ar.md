@@ -51,3 +51,54 @@ Regra de arbitragem SPI: **não existe.** O laço é sequencial — a escrita no
 ## Blocked by
 
 - 02 (superloop, HAL, watchdog)
+
+## Estado da implementação (2026-09-02)
+
+Feito e coberto por teste nativo. Falta só a verificação de bancada (receptor
+ouvindo a 1 Hz), que espera o hardware.
+
+- **Núcleo novo `core/survival_computer.{h,cpp}`** — o análogo enxuto do
+  `FlightComputer::update`, por TDD (7 testes em `test/test_survival_computer/`).
+  `update(sample, t_ms)` devolve `Outputs { LogRecord record; TelemetryPacket
+  packet; bool has_packet; }`. Sem estado global, sem relógio, sem header de
+  Arduino — o `native` (que compila só `src/core` sem Arduino) é a prova disso.
+  - **Altitude:** `altitude_from_pressure(pressao, kFixedDatumPa)` com
+    `kFixedDatumPa = 101325.0f` definido neste header (o datum ISA fixo).
+  - **Mantida entre ciclos:** o baro é lido a 25 Hz dentro do laço de 50 Hz, então
+    a última altitude derivada é guardada — um pacote nunca sai com 0 por cair num
+    subciclo sem leitura fresca. `have_baro_altitude_` é o bit 6 (`kAltRef`).
+  - **Baro ausente:** altitude 0 e bit 6 apagado (o fallback para altitude de GPS é
+    da issue 05).
+  - **Pacote só-altitude (12 B):** fase = `Flight` (=1), fonte = `None` (=0),
+    `t_ds` = decissegundos desde o boot (satura), sequência u16 incrementa por
+    pacote.
+  - **Registro:** montado todo ciclo, espelho do cru + altitude derivada; sequência
+    u32 por ciclo. Campos das issues 04/07/08 ficam em zero.
+- **Cadência de TX no núcleo, baseada no tempo** (decisão do grill deste ciclo):
+  `has_packet` sobe quando `t_ms` avançou ≥ `kTxPeriodMs` (1000 ms) desde o último
+  pacote; o primeiro ciclo já emite (telemetria do power-on). Robusto ao jitter do
+  laço e testável no `native` — a alternativa (contar 50 voltas no `main`) não é
+  nem uma coisa nem outra.
+- **Byte de saúde:** nesta fatia só o bit 6. O bitmap honesto completo (IMU, baro,
+  GPS-vivo, SD, SX1276) continua na issue 08.
+- **`main.cpp`:** o superloop chama `update()` todo ciclo, faz `g_sx1276.service()`
+  a cada volta e dispara `g_sx1276.start_send()` quando `has_packet`. Sequencial —
+  uma thread só, sem regra de arbitragem de barramento. Rádio em SF7 (o `begin()`
+  da issue 02 já sobe em modo Flight). O diagnóstico do Serial agora mostra a
+  altitude derivada e o pacote transmitido.
+
+### Definition of Done
+
+1. ✅ `pio test -e native` — 12/12 (5 de contrato + 7 do SurvivalComputer).
+2. ✅ `pio run -e heltec_wifi_lora_32_V2` compila.
+3. ✅ As cinco greps de `DISCIPLINE.md` saem vazias.
+4. ✅ Esta seção.
+5. ✅ `NEXT.md` atualizado (03 → ✅, ▶ move para a 04).
+
+### Aberto para a bancada (precisa da placa e do receptor)
+
+- O `3km913hzReceiver` **sem alteração** decodifica altitude coerente com a local,
+  a 1 Hz.
+- ⚠️ O `radio_sx1276.cpp` copiado ainda está em **+2 dBm** (potência de bancada
+  reduzida). A TX de voo é +20 dBm — reverter antes do teste de alcance, e nunca
+  transmitir sem antena.

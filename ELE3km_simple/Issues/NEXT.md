@@ -12,12 +12,12 @@ A barra é **sobrevivência**, não paridade: menos estado, menos lugares para t
 ## Fila `/tdd`
 
 - ✅ 01 — Esqueleto autônomo + codecs congelados copiados + teste de compatibilidade (2026-09-02)
-- **▶ 02 — Superloop de 50 Hz + bring-up da placa + watchdog**
-- 03 — Tracer bullet: altitude no ar (pressão-altitude, datum fixo)
-- 04 — IMU + velocidade vertical por diferença finita
-- 05 — GPS: config idempotente reaplicada + pacote completo com porta de fix
-- 06 — Log microSD: arquivo pré-alocado, escrita em blocos, registro por ciclo
-- 07 — Recuperação mínima do barramento I²C
+- ✅ 02 — Superloop de 50 Hz + bring-up da placa + watchdog (2026-09-02, falta verificação de bancada)
+- ✅ 03 — Tracer bullet: altitude no ar (pressão-altitude, datum fixo) (2026-09-02, falta verificação de bancada)
+- ✅ 04 — IMU + velocidade vertical por diferença finita (2026-09-02, falta verificação de bancada)
+- ✅ 05 — GPS: config idempotente reaplicada + pacote completo com porta de fix (2026-09-02, falta verificação de bancada)
+- ✅ 06 — Log microSD: arquivo pré-alocado (256 MB), escrita em blocos, registro por ciclo (2026-09-02, falta verificação de bancada)
+- **▶ 07 — Recuperação mínima do barramento I²C**
 - 08 — Byte de saúde honesto
 - 09 — Beacon de sobrevivência por boot-loop + watchdog de cadência de TX
 - 10 — Validação de bancada ponta-a-ponta (HITL contra receptor e replay)

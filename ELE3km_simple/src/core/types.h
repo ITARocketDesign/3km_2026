@@ -122,15 +122,24 @@ constexpr uint8_t kAltRef = 1 << 6;
 constexpr uint8_t kAccelSat = 1 << 7;
 }  // namespace health_bit
 
-// Saúde dos subsistemas que a task de I/O possui (barramento SPI) e que o núcleo
-// não enxerga pela amostra: o cartão e o rádio. imu, baro e gps entram pela própria
-// amostra (imu_valid, baro_valid, gps.receiving). A HAL monta isto a partir das
-// máquinas de saúde (core/health.h) e o passa ao núcleo, que compõe o bitmap de
-// saúde do byte 18. Default tudo falso: o caso honesto de quem ainda não tem esses
-// subsistemas — os bits ficam apagados, que é o que significam.
+// Saúde de subsistema que o núcleo NÃO consegue ler de forma estável pela amostra.
+// A HAL a monta (as flags g_*_ok, mantidas pela recuperação da issue 07) e a passa
+// ao núcleo, que compõe o bitmap de saúde do byte 18 (issue 08). Default tudo falso:
+// o caso honesto de quem ainda não tem esses subsistemas — os bits ficam apagados,
+// que é o que significam.
+//
+//  • sd, sx1276 — subsistemas do barramento SPI, que não aparecem na amostra.
+//  • baro       — o baro APARECE na amostra (baro_valid), mas ele é lido a 25 Hz
+//                 dentro do laço de 50 Hz, então baro_valid é falso em metade dos
+//                 ciclos mesmo com o sensor são: pisca. O bit de saúde precisa da
+//                 verdade estável "baro vivo" (g_baro_ok), que só a HAL tem, e que a
+//                 issue 07 apaga quando o begin() pós-recuperação falha. imu e gps
+//                 são lidos a cada volta, então entram pela amostra (imu_valid,
+//                 gps.receiving) sem piscar.
 struct IoSubsystemHealth {
     bool sd     = false;
     bool sx1276 = false;
+    bool baro   = false;
 };
 
 // Pacote de telemetria em forma decodificada. O codec (telemetry_codec.h)

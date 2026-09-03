@@ -23,7 +23,8 @@ uint16_t to_decaseconds(uint32_t t_ms) {
 
 }  // namespace
 
-Outputs SurvivalComputer::update(const SensorSample& sample, uint32_t t_ms) {
+Outputs SurvivalComputer::update(const SensorSample& sample, uint32_t t_ms,
+                                 const IoSubsystemHealth& io) {
     Outputs out;
 
     // Porta de fix (issue 05): satélites ≥ 4 E HDOP ≤ 5,0. hdop_half é HDOP × 2,
@@ -81,24 +82,37 @@ Outputs SurvivalComputer::update(const SensorSample& sample, uint32_t t_ms) {
     r.fused_longitude_1e7 = gps.longitude_1e7;
     r.position_source     = gps_fix_valid ? PositionSource::Gps : PositionSource::None;
 
-    // Byte de saúde do REGISTRO: bit 6 (kAltRef) — a altitude é barométrica (1) ou
-    // caiu para 0/GPS por baro ausente (0) — e o bit 7 (kAccelSat), que grava a
-    // saturação do acelerômetro só no cartão. O pacote de rádio NÃO recebe o bit 7
-    // (packet_health abaixo): o byte de saúde do ar é contrato congelado com o
-    // solo. O bitmap honesto completo (IMU, baro, GPS-vivo, SD, SX1276) é da
-    // issue 08.
+    // Byte de saúde honesto (issue 08). Bit em 1 = subsistema OK; o mesmo bitmap vai
+    // ao pacote e ao registro, salvo o bit 7 (kAccelSat), que grava a saturação do
+    // acelerômetro SÓ no cartão — o byte de saúde do ar é contrato congelado com o
+    // solo e não pode ganhar significado novo. Bit 4 (E22) fica sempre 0: o rádio foi
+    // abandonado, mas o bit segue reservado para não mexer no layout que o solo lê.
+    //
+    // As fontes de cada bit: imu e gps vêm da amostra (lidos a cada volta, não
+    // piscam); baro, sd e sx1276 vêm de `io` (a amostra não os expõe de forma estável
+    // — ver IoSubsystemHealth). Sem GPS-altitude reusada no fallback, "altitude é
+    // barométrica" (bit 6) é o mesmo sinal de "baro vivo" (bit 1): io.baro apaga os
+    // dois juntos quando o baro morre.
     uint8_t packet_health = 0;
-    if (have_baro_altitude_) {
-        packet_health |= health_bit::kAltRef;
+    if (sample.imu_valid) {
+        packet_health |= health_bit::kImu;      // bit 0
     }
-    // Bit 2 (kGps): o receptor está VIVO (falando NMEA), não "tem fix". Um receptor
-    // que fala sem fix acende o bit e manda posição inutilizável; um mudo o apaga.
+    if (io.baro) {
+        packet_health |= health_bit::kBaro;     // bit 1
+        packet_health |= health_bit::kAltRef;   // bit 6
+    }
     if (gps.receiving) {
-        packet_health |= health_bit::kGps;
+        packet_health |= health_bit::kGps;      // bit 2 — VIVO (fala NMEA), não "tem fix"
+    }
+    if (io.sd) {
+        packet_health |= health_bit::kSd;       // bit 3
+    }
+    if (io.sx1276) {
+        packet_health |= health_bit::kSx1276;   // bit 5
     }
     uint8_t record_health = packet_health;
     if (sample.accel_saturated) {
-        record_health |= health_bit::kAccelSat;
+        record_health |= health_bit::kAccelSat;  // bit 7 — só no registro
     }
     r.health = record_health;
 

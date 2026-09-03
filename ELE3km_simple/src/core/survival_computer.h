@@ -39,7 +39,13 @@ class SurvivalComputer {
     // Consome a amostra adquirida em t_ms e devolve o que gravar e — a 1 Hz — o
     // que transmitir. O primeiro ciclo já emite um pacote (telemetria do
     // power-on); depois, um a cada kTxPeriodMs.
-    Outputs update(const SensorSample& sample, uint32_t t_ms);
+    //
+    // `io` traz a saúde dos subsistemas que a amostra não expõe de forma estável
+    // (cartão, rádio, baro-vivo — ver IoSubsystemHealth), para o byte 18 de saúde
+    // (issue 08). Default tudo-ausente: o único chamador de produção (main.cpp)
+    // sempre o passa explícito; os testes que não exercem esses bits usam o default.
+    Outputs update(const SensorSample& sample, uint32_t t_ms,
+                   const IoSubsystemHealth& io = {});
 
   private:
     // Duas sequências independentes: a do registro incrementa por ciclo (u32); a

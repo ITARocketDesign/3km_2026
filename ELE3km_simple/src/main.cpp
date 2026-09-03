@@ -102,7 +102,7 @@ void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.println();
-    Serial.println("ELE3km_simple — issue 07: recuperacao minima do barramento I2C (clock-out + begin, 1/ciclo)");
+    Serial.println("ELE3km_simple — issue 08: byte de saude honesto (IMU/baro/GPS-vivo/SD/SX1276 no pacote e no log)");
 
     // Só agora o barramento SPI pode subir. Um rádio e o cartão dividem esta VSPI.
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_LORA_CS);
@@ -214,8 +214,17 @@ void loop() {
         sample.gps_uart_overflows = g_gps.uart_overflow_count();
     }
 
-    // 4. Núcleo: monta o registro (todo ciclo) e o pacote (a 1 Hz).
-    const core::Outputs out = g_computer.update(sample, cycle_start_ms);
+    // 4. Núcleo: monta o registro (todo ciclo) e o pacote (a 1 Hz). O byte de saúde
+    //    (issue 08) precisa da saúde dos subsistemas que a amostra não expõe estável:
+    //    baro-vivo (g_baro_ok, que a issue 07 apaga quando o begin() pós-recuperação
+    //    falha — o baro_valid da amostra pisca com o subciclo de 25 Hz), o cartão
+    //    (is_open() cai quando ele adoece ou o arquivo enche) e o rádio. imu e gps
+    //    entram pela própria amostra. Bits 0/2 pela amostra, 1/3/5/6 por este io.
+    core::IoSubsystemHealth io;
+    io.baro   = g_baro_ok;
+    io.sd     = g_log.is_open();
+    io.sx1276 = g_sx1276_ok;
+    const core::Outputs out = g_computer.update(sample, cycle_start_ms, io);
 
     // 4b. Cartão (issue 06): grava o registro deste ciclo no log durável. O núcleo
     //     monta um registro por ciclo; aqui ele é serializado com o contador de boot

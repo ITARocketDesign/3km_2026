@@ -97,7 +97,9 @@ void test_builds_a_log_record_every_cycle(void) {
 // ── Altitude barométrica acende o bit 6 de saúde (kAltRef) ──────────────────
 void test_barometric_altitude_sets_health_bit6(void) {
     SurvivalComputer c;
-    const Outputs o = c.update(baro_sample(90000.0f), 0);
+    IoSubsystemHealth io;
+    io.baro = true;  // baro vivo → altitude é barométrica
+    const Outputs o = c.update(baro_sample(90000.0f), 0, io);
     TEST_ASSERT_TRUE((o.packet.health & health_bit::kAltRef) != 0);
     TEST_ASSERT_TRUE((o.record.health & health_bit::kAltRef) != 0);
 }
@@ -116,19 +118,21 @@ void test_absent_baro_yields_zero_altitude_and_clears_bit6(void) {
 // ── A altitude é mantida nos subciclos sem leitura fresca de baro ───────────
 void test_altitude_is_held_across_baroless_subcycles(void) {
     SurvivalComputer c;
-    c.update(baro_sample(90000.0f), 0);  // estabelece a altitude no ciclo 0
+    IoSubsystemHealth io;
+    io.baro = true;  // baro vivo o tempo todo; só sem leitura FRESCA nos subciclos
+    c.update(baro_sample(90000.0f), 0, io);  // estabelece a altitude no ciclo 0
 
     SensorSample no_baro;
     Outputs b;
     for (uint32_t t = 20; t <= 1000; t += 20) {
-        b = c.update(no_baro, t);  // baro sem leitura fresca até o próximo pacote
+        b = c.update(no_baro, t, io);  // baro sem leitura fresca até o próximo pacote
     }
 
     TEST_ASSERT_TRUE(b.has_packet);  // pacote em t = 1000
     const int16_t expected =
         static_cast<int16_t>(std::lround(altitude_from_pressure(90000.0f, kFixedDatumPa)));
     TEST_ASSERT_EQUAL_INT16(expected, b.packet.altitude_m);           // mantida, não 0
-    TEST_ASSERT_TRUE((b.packet.health & health_bit::kAltRef) != 0);   // ainda barométrica
+    TEST_ASSERT_TRUE((b.packet.health & health_bit::kAltRef) != 0);   // baro vivo → barométrica
 }
 
 // ── Sequência incrementa por pacote; tempo em ds desde o boot ───────────────
@@ -342,6 +346,125 @@ void test_health_gps_bit_follows_receiving_not_fix(void) {
     }
 }
 
+// ── Bit 0 de saúde (IMU) segue imu_valid, no pacote e no registro ───────────
+void test_health_imu_bit_follows_imu_valid(void) {
+    // Leitura inercial fresca e confiável: bit 0 ligado nos dois byte de saúde.
+    {
+        SurvivalComputer c;
+        SensorSample s = baro_sample(90000.0f);
+        s.imu_valid    = true;
+        const Outputs o = c.update(s, 0);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kImu) != 0);
+        TEST_ASSERT_TRUE((o.record.health & health_bit::kImu) != 0);
+    }
+    // IMU ausente (imu_valid falso é o default de quem não tem leitura): bit 0 apagado.
+    {
+        SurvivalComputer c;
+        const Outputs o = c.update(baro_sample(90000.0f), 0);
+        TEST_ASSERT_FALSE((o.packet.health & health_bit::kImu) != 0);
+        TEST_ASSERT_FALSE((o.record.health & health_bit::kImu) != 0);
+    }
+}
+
+// ── Bits 1 (baro) e 6 (alt-ref) seguem io.baro, juntos, sem piscar ──────────
+// baro_valid pisca com o subciclo de 25 Hz; a saúde do baro vem da flag de
+// subsistema vivo da HAL (io.baro = g_baro_ok, issue 07), estável e que apaga
+// quando o baro morre. Sem GPS-altitude reusada no fallback, "altitude é
+// barométrica" (bit 6) é o mesmo sinal que "baro vivo" (bit 1).
+void test_health_baro_bits_follow_io_baro_not_sample_flicker(void) {
+    // baro vivo, leitura fresca: bits 1 e 6 acesos nos dois byte de saúde.
+    {
+        SurvivalComputer c;
+        IoSubsystemHealth io;
+        io.baro = true;
+        const Outputs o = c.update(baro_sample(90000.0f), 0, io);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kBaro) != 0);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kAltRef) != 0);
+        TEST_ASSERT_TRUE((o.record.health & health_bit::kBaro) != 0);
+        TEST_ASSERT_TRUE((o.record.health & health_bit::kAltRef) != 0);
+    }
+    // baro vivo, subciclo SEM leitura fresca (baro_valid falso): os bits NÃO piscam.
+    {
+        SurvivalComputer c;
+        IoSubsystemHealth io;
+        io.baro = true;
+        SensorSample no_fresh;  // baro_valid = false
+        const Outputs o = c.update(no_fresh, 0, io);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kBaro) != 0);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kAltRef) != 0);
+    }
+    // baro morto (io.baro falso): apaga bit 1 e bit 6 juntos, mesmo com leitura fresca.
+    {
+        SurvivalComputer c;
+        IoSubsystemHealth io;  // baro = false
+        const Outputs o = c.update(baro_sample(90000.0f), 0, io);
+        TEST_ASSERT_FALSE((o.packet.health & health_bit::kBaro) != 0);
+        TEST_ASSERT_FALSE((o.packet.health & health_bit::kAltRef) != 0);
+    }
+}
+
+// ── Bits 3 (SD) e 5 (SX1276) seguem io.sd / io.sx1276 ───────────────────────
+void test_health_sd_and_sx1276_bits_follow_io(void) {
+    // Cartão e rádio vivos: bits 3 e 5 acesos no pacote e no registro.
+    {
+        SurvivalComputer c;
+        IoSubsystemHealth io;
+        io.sd     = true;
+        io.sx1276 = true;
+        const Outputs o = c.update(baro_sample(90000.0f), 0, io);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kSd) != 0);
+        TEST_ASSERT_TRUE((o.packet.health & health_bit::kSx1276) != 0);
+        TEST_ASSERT_TRUE((o.record.health & health_bit::kSd) != 0);
+        TEST_ASSERT_TRUE((o.record.health & health_bit::kSx1276) != 0);
+    }
+    // Ausentes (io default): bits apagados.
+    {
+        SurvivalComputer c;
+        const Outputs o = c.update(baro_sample(90000.0f), 0);
+        TEST_ASSERT_FALSE((o.packet.health & health_bit::kSd) != 0);
+        TEST_ASSERT_FALSE((o.packet.health & health_bit::kSx1276) != 0);
+    }
+}
+
+// ── Bit 4 (E22) é reservado e fica sempre 0, mesmo com tudo vivo ────────────
+void test_health_e22_bit4_reserved_always_zero(void) {
+    SurvivalComputer c;
+    IoSubsystemHealth io;
+    io.sd = true;
+    io.sx1276 = true;
+    io.baro = true;
+    SensorSample s     = gps_sample(6, 4);  // baro + gps recebendo + fix
+    s.imu_valid        = true;
+    s.accel_saturated  = true;
+    const Outputs o = c.update(s, 0, io);
+    TEST_ASSERT_FALSE((o.packet.health & health_bit::kE22) != 0);
+    TEST_ASSERT_FALSE((o.record.health & health_bit::kE22) != 0);
+}
+
+// ── O mesmo bitmap (bits 0–6) vai ao pacote e ao registro; só o 7 difere ────
+void test_health_bitmap_identical_in_packet_and_record_except_accelsat(void) {
+    SurvivalComputer c;
+    IoSubsystemHealth io;
+    io.sd = true;
+    io.sx1276 = true;
+    io.baro = true;
+    SensorSample s     = gps_sample(6, 4);
+    s.imu_valid        = true;
+    s.accel_saturated  = true;  // liga o bit 7 SÓ no registro
+    const Outputs o = c.update(s, 0, io);
+
+    const uint8_t low7 = 0x7F;  // bits 0–6
+    TEST_ASSERT_EQUAL_UINT8(o.packet.health & low7, o.record.health & low7);
+    TEST_ASSERT_FALSE((o.packet.health & health_bit::kAccelSat) != 0);
+    TEST_ASSERT_TRUE((o.record.health & health_bit::kAccelSat) != 0);
+
+    // Com tudo vivo, o pacote carrega exatamente os bits 0,1,2,3,5,6 — nada de E22
+    // (bit 4) nem de saturação (bit 7).
+    const uint8_t expected = health_bit::kImu | health_bit::kBaro | health_bit::kGps |
+                             health_bit::kSd | health_bit::kSx1276 | health_bit::kAltRef;
+    TEST_ASSERT_EQUAL_UINT8(expected, o.packet.health);
+}
+
 // ── Registro: posição fundida = bruta do GPS (não há fusão nesta barra) ─────
 void test_record_fused_position_equals_raw_gps(void) {
     SurvivalComputer c;
@@ -384,6 +507,11 @@ int main(int, char**) {
     RUN_TEST(test_fix_gate_at_boundaries);
     RUN_TEST(test_gps_quality_fields_present_in_both_forms);
     RUN_TEST(test_health_gps_bit_follows_receiving_not_fix);
+    RUN_TEST(test_health_imu_bit_follows_imu_valid);
+    RUN_TEST(test_health_baro_bits_follow_io_baro_not_sample_flicker);
+    RUN_TEST(test_health_sd_and_sx1276_bits_follow_io);
+    RUN_TEST(test_health_e22_bit4_reserved_always_zero);
+    RUN_TEST(test_health_bitmap_identical_in_packet_and_record_except_accelsat);
     RUN_TEST(test_record_fused_position_equals_raw_gps);
     return UNITY_END();
 }

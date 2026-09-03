@@ -18,8 +18,8 @@ A barra é **sobrevivência**, não paridade: menos estado, menos lugares para t
 - ✅ 05 — GPS: config idempotente reaplicada + pacote completo com porta de fix (2026-09-02, falta verificação de bancada)
 - ✅ 06 — Log microSD: arquivo pré-alocado (256 MB), escrita em blocos, registro por ciclo (2026-09-02, falta verificação de bancada)
 - ✅ 07 — Recuperação mínima do barramento I²C (clock-out + begin, 1/ciclo) (2026-09-03, fatia HAL/target — falta verificação de bancada)
-- **▶ 08 — Byte de saúde honesto**
-- 09 — Beacon de sobrevivência por boot-loop + watchdog de cadência de TX
+- ✅ 08 — Byte de saúde honesto (IMU/baro/GPS-vivo/SD/SX1276 no pacote e no log) (2026-09-03, falta verificação de bancada)
+- **▶ 09 — Beacon de sobrevivência por boot-loop + watchdog de cadência de TX**
 - 10 — Validação de bancada ponta-a-ponta (HITL contra receptor e replay)
 
 As issues 01 e as partes de núcleo puro das seguintes passam por `/tdd` (env
